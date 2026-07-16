@@ -1,0 +1,84 @@
+# ─────────────────────────────────────────────────────────────
+# Sanmati Packaging PMS — root .gitignore
+# Covers BOTH the frontend (Vite/React) and the backend (sanmati/, Node ESM).
+# Patterns without a leading slash match at any depth, so a single file here
+# applies to frontend/ and sanmati/ alike.
+# ─────────────────────────────────────────────────────────────
+
+# ── Dependencies ──
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/releases
+!.yarn/plugins
+!.yarn/versions
+
+# ── Environment / secrets (NEVER commit real credentials) ──
+.env
+.env.*
+!.env.example
+!.env.sample
+*.pem
+*.key
+
+# ── Build output ──
+dist/
+build/
+out/
+.vite/
+.output/
+*.tsbuildinfo
+
+# ── Logs ──
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# ── Runtime data ──
+pids/
+*.pid
+*.seed
+*.pid.lock
+dump.rdb          # local Redis snapshot
+*.rdb
+uploads/          # user-uploaded files (if the backend writes any)
+tmp/
+temp/
+
+# ── Test / coverage ──
+coverage/
+.nyc_output/
+
+# ── Caches ──
+.cache/
+.eslintcache
+.parcel-cache/
+.turbo/
+*.tgz
+
+# ── OS junk ──
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── Editor / IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.sublime-workspace
+
+# NOTE: lock files (package-lock.json / yarn.lock / pnpm-lock.yaml) are
+# intentionally NOT ignored — commit them for reproducible installs.

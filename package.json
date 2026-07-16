@@ -1,0 +1,17 @@
+{
+  "name": "sanmati-pms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sanmati Packaging PMS — MERN MES. Single-platform deploy: the backend (sanmati/) serves the built frontend (frontend/dist) from one origin.",
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "scripts": {
+    "install:all": "npm install --prefix sanmati && npm install --prefix frontend",
+    "build": "npm install --prefix sanmati && npm install --prefix frontend && npm run build --prefix frontend",
+    "start": "node sanmati/src/server.js",
+    "worker": "node sanmati/src/workers/index.js",
+    "dev:backend": "npm run dev --prefix sanmati",
+    "dev:frontend": "npm run dev --prefix frontend"
+  }
+}

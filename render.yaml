@@ -1,0 +1,57 @@
+# Render Blueprint — one Web Service that builds the frontend and runs the
+# backend, which serves the built SPA from the SAME origin (one URL, no CORS).
+# Docs: https://render.com/docs/blueprint-spec
+#
+# You still need TWO external datastores the app depends on:
+#   • MongoDB  → MongoDB Atlas (set MONGODB_URI below)
+#   • Redis    → Render "Key Value" instance or Upstash (set REDIS_URL below)
+# Secrets marked `sync: false` are entered in the Render dashboard, not git.
+
+services:
+  - type: web
+    name: sanmati-pms
+    runtime: node
+    plan: free
+    region: singapore          # pick the region closest to you / your DB
+    buildCommand: npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      # Auto-generated 32+ char secrets (rotate by deleting these vars in the dashboard):
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: "*"
+      # ── Fill these in the Render dashboard → Environment (kept out of git) ──
+      - key: MONGODB_URI
+        sync: false            # mongodb+srv://USER:PASS@cluster.../sanmati?retryWrites=true&w=majority
+      - key: REDIS_URL
+        sync: false            # redis://... (internal URL of your Render Key Value / Upstash)
+      # ── Optional: seed the first admin on first boot (must be >=8 chars) ──
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_NAME
+        value: System Admin
+
+  # ── OPTIONAL second service: background worker for live IoT ingestion +
+  # scheduled ERP syncs. Uncomment if you need those. Shares the same env vars.
+  # - type: worker
+  #   name: sanmati-worker
+  #   runtime: node
+  #   plan: free
+  #   buildCommand: npm install --prefix sanmati
+  #   startCommand: npm run worker
+  #   envVars:
+  #     - key: NODE_ENV
+  #       value: production
+  #     - key: MONGODB_URI
+  #       sync: false
+  #     - key: REDIS_URL
+  #       sync: false

@@ -1,0 +1,470 @@
+import { useMemo, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
+import {
+  ArrowRight, AlertTriangle, Sparkles, Zap, Radio, Siren, Printer, Search,
+  Magnet, Flame, Scissors, Package2, Gift, Calendar, Hourglass, MapPin,
+  ShoppingCart,
+} from 'lucide-react';
+import clsx from 'clsx';
+import { dashboardApi, jobApi, machineApi, salesOrderApi } from '../api/endpoints.js';
+import { authStore } from '../context/authStore.js';
+import { useSocket } from '../hooks/useSocket.js';
+
+function pct(v) {
+  if (v === null || v === undefined) return '—';
+  return `${Math.round(v * 1000) / 10}%`;
+}
+
+const STAGE_META = [
+  { key: 'printing',    label: 'Printing',    icon: '🖨️' },
+  { key: 'inspection',  label: 'Inspect',     icon: '🔍' },
+  { key: 'lamination',  label: 'Laminat.',    icon: '🧲' },
+  { key: 'hot_room',    label: 'HotRoom',     icon: '🔥' },
+  { key: 'slitting',    label: 'Slitting',    icon: '✂️' },
+  { key: 'cutting',     label: 'Cutting',     icon: '🗂️' },
+  { key: 'packaging',   label: 'Packag.',     icon: '📦' },
+];
+
+export function DashboardPage() {
+  const user = authStore((s) => s.user);
+  const plantId = user?.plantId;
+  const qc = useQueryClient();
+
+  // ═══ Data ═══
+  const overview = useQuery({
+    queryKey: ['dashboard', 'overview', plantId],
+    queryFn: async () => (await dashboardApi.overview(plantId)).data,
+    refetchInterval: 30_000,
+  });
+  const suggestions = useQuery({
+    queryKey: ['dashboard', 'suggestions', plantId],
+    queryFn: async () => (await dashboardApi.suggestions(plantId)).data,
+    refetchInterval: 60_000,
+  });
+  const alerts = useQuery({
+    queryKey: ['dashboard', 'alerts', plantId],
+    queryFn: async () => (await dashboardApi.alerts(plantId)).data,
+    refetchInterval: 30_000,
+  });
+  const machines = useQuery({
+    queryKey: ['machines', 'live', plantId],
+    queryFn: async () => (await machineApi.live(plantId)).data,
+    refetchInterval: 20_000,
+  });
+  const activeJob = useQuery({
+    queryKey: ['jobs', 'focus', plantId],
+    queryFn: async () => {
+      const r = await jobApi.list({ status: 'in_progress', limit: 1 });
+      return r.data?.[0] || null;
+    },
+    refetchInterval: 30_000,
+  });
+
+  // Sales orders that haven't started production yet — for "Orders Awaiting Planning" panel
+  const newOrders = useQuery({
+    queryKey: ['dashboard', 'new-orders', plantId],
+    queryFn: async () => (await salesOrderApi.list({ plantId, limit: 50 })).data,
+    refetchInterval: 30_000,
+  });
+
+  // ═══ Live feed ═══
+  const [feed, setFeed] = useState([]);
+  useSocket(
+    '/ops',
+    {
+      'machine:events': (events) => {
+        const first = events[0];
+        if (!first) return;
+        const dot = first.state === 'down' ? 'bg-state-down'
+          : first.state === 'running' ? 'bg-state-running'
+          : first.alarmCode ? 'bg-state-down'
+          : 'bg-brand-500';
+        setFeed((f) => [
+          {
+            id: Date.now() + Math.random(),
+            dot,
+            bold: first.machineCode,
+            msg: first.state
+              ? `→ ${first.state}` + (first.unitsProduced ? ` · +${first.unitsProduced} units` : '')
+              : first.alarmCode
+              ? `⚠ alarm ${first.alarmCode}`
+              : first.unitsProduced ? `+${first.unitsProduced} units produced` : 'heartbeat',
+            at: new Date(first.timestamp),
+          },
+          ...f,
+        ].slice(0, 8));
+      },
+      'machine:status': () => qc.invalidateQueries({ queryKey: ['machines', 'live'] }),
+      'order:update': () => {
+        qc.invalidateQueries({ queryKey: ['jobs'] });
+        qc.invalidateQueries({ queryKey: ['dashboard'] });
+      },
+    },
+    [plantId],
+    (s) => { if (plantId) s.emit('subscribe:plant', plantId); }
+  );
+
+  const data = overview.data;
+
+  // Machine state counts
+  const machineStats = useMemo(() => {
+    const m = machines.data || [];
+    const by = { running: 0, idle: 0, down: 0, maintenance: 0, offline: 0 };
+    for (const x of m) by[x.currentStatus?.state || 'offline']++;
+    return { total: m.length, ...by };
+  }, [machines.data]);
+
+  const oee = data?.oee || {};
+  const availability = oee.availability ?? 0;
+  const performance = oee.performance ?? 0;
+  const quality = oee.quality ?? 0;
+  const oeeTotal = oee.oee ?? 0;
+
+  return (
+    <div className="space-y-4">
+      {/* ═══ TOP STATS ROW — 6 cards ═══ */}
+      <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        <StatCard accent="green" label="Production Today"
+          value={(oee.totalProduced ?? 0).toLocaleString()} valueSuffix="kg"
+          meta={<><span className="sc-up">↑ {pct(quality)}</span> quality</>} />
+        <StatCard accent="blue" label="Active Orders"
+          value={data?.orders?.in_progress ?? 0}
+          meta={<>{data?.orders?.planned ?? 0} planned</>} />
+        <StatCard accent="yellow" label="Machines Running"
+          value={machineStats.running} valueSuffix={`/${machineStats.total}`}
+          meta={<>{machineStats.idle} idle · {machineStats.down} down</>} />
+        <StatCard accent="purple" label="OEE Average"
+          value={pct(oeeTotal)}
+          meta={<>availability × perf × qty</>} />
+        <StatCard accent="red" label="QC Pending"
+          value={data?.qc?.sampled ?? 0}
+          meta={<>{pct(data?.qc?.passRate)} pass rate</>} />
+        <StatCard accent="orange" label="Dispatch Pending"
+          value={data?.dispatch?.pending ?? 0}
+          meta={<>awaiting ship</>} />
+      </section>
+
+      {/* ═══ SMART SUGGESTIONS ═══ */}
+      <section className="panel">
+        <div className="panel-header">
+          <div className="panel-title">
+            <Sparkles className="h-4 w-4 text-brand-500" />
+            Smart Suggestions
+            <span className="ml-1 text-[9.5px] font-bold bg-brand-50 text-brand-600 border border-brand-500/20 rounded-full px-2 py-0.5">AUTO</span>
+          </div>
+        </div>
+        <div className="space-y-2">
+          {(suggestions.data || []).length === 0 ? (
+            <div className="text-center py-6 text-[12.5px] text-ink-400">
+              No suggestions right now. System is running smoothly.
+            </div>
+          ) : (
+            (suggestions.data || []).map((s, i) => <SuggestionCard key={i} s={s} />)
+          )}
+        </div>
+      </section>
+
+      {/* ═══ LIVE PROCESS FLOW + OEE BREAKDOWN ═══ */}
+      <section className="grid grid-cols-1 lg:grid-cols-[1.5fr_1fr] gap-3">
+        {/* Live Process Flow */}
+        <div className="panel">
+          <div className="panel-header">
+            <div className="panel-title">
+              <Zap className="h-4 w-4 text-brand-500" />
+              Live Process Flow
+            </div>
+            {activeJob.data && (
+              <span className="chip-blue text-[10.5px] font-bold">{activeJob.data.orderNumber}</span>
+            )}
+          </div>
+          <ProcessFlow job={activeJob.data} />
+        </div>
+
+        {/* OEE Breakdown rings */}
+        <div className="panel">
+          <div className="panel-header">
+            <div className="panel-title">
+              ⚡ OEE Breakdown
+            </div>
+            <span className="chip-blue text-[10px]">SHIFT</span>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 py-1">
+            <Ring label="Availability" value={availability} color="#1a6bff" />
+            <Ring label="Performance" value={performance} color="#059669" />
+            <Ring label="Quality" value={quality} color="#ea580c" />
+            <Ring label="OEE Total" value={oeeTotal} color="#7c3aed" />
+          </div>
+        </div>
+      </section>
+
+      {/* ═══ ORDERS AWAITING PLANNING + ACTIVE ALERTS ═══ */}
+      <section className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <OrdersAwaitingPlanningPanel orders={newOrders.data || []} />
+
+        <div className="panel">
+          <div className="panel-header">
+            <div className="panel-title">
+              <Siren className="h-4 w-4 text-state-down" />
+              Active Alerts
+            </div>
+            <span className="text-[10px] font-bold text-ink-400">
+              {(alerts.data || []).length} alert{(alerts.data || []).length !== 1 ? 's' : ''}
+            </span>
+          </div>
+          {(alerts.data || []).length === 0 ? (
+            <div className="text-center py-8 text-[12.5px] text-ink-400">
+              No active alerts. All systems nominal.
+            </div>
+          ) : (
+            (alerts.data || []).map((a, i) => (
+              <div key={i} className={clsx(
+                'alert-item',
+                a.severity === 'crit' ? 'ai-crit' : a.severity === 'warn' ? 'ai-warn' : 'ai-info'
+              )}>
+                <span className="text-[14px]">{a.icon || '⚠'}</span>
+                <div className="flex-1">
+                  <div className="font-bold text-ink-900">{a.title}</div>
+                  <div className="text-[11.5px] text-ink-600 mt-0.5">{a.desc}</div>
+                </div>
+                <div className="feed-time">
+                  {new Date(a.at).toLocaleTimeString('en-GB', { hour12: false, hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+/* ─── Components ─── */
+
+function StatCard({ accent, label, value, valueSuffix, meta }) {
+  return (
+    <div className={`stat-card accent-${accent}`}>
+      <div className="sc-label">{label}</div>
+      <div className="sc-val">
+        {value}
+        {valueSuffix && <span className="text-[13px] text-ink-400 ml-0.5">{valueSuffix}</span>}
+      </div>
+      <div className="sc-meta">{meta}</div>
+    </div>
+  );
+}
+
+function SuggestionCard({ s }) {
+  const bgByKind = {
+    opportunity: 'bg-state-running/5 border-state-running/25',
+    urgent:      'bg-state-down/5 border-state-down/25',
+    warning:     'bg-state-idle/5 border-state-idle/25',
+    info:        'bg-brand-50 border-brand-500/20',
+  };
+  const titleColor = {
+    opportunity: 'text-state-running',
+    urgent:      'text-state-down',
+    warning:     'text-state-idle',
+    info:        'text-brand-600',
+  };
+  return (
+    <div className={clsx('rounded-lg px-3.5 py-3 flex items-start gap-3 border', bgByKind[s.kind] || 'bg-ink-50 border-ink-200')}>
+      <span className="text-[20px] shrink-0">{s.icon}</span>
+      <div className="flex-1">
+        <div className={clsx('font-bold text-[12.5px]', titleColor[s.kind])}>{s.title}</div>
+        <div className="text-[11.5px] text-ink-600 mt-0.5">{s.desc}</div>
+      </div>
+      {s.action && (
+        <Link
+          to={s.action.href}
+          className="shrink-0 rounded-md bg-white border border-ink-200 hover:bg-ink-50 text-[11px] font-bold text-ink-700 px-2.5 py-1 flex items-center gap-1"
+        >
+          {s.action.label} <ArrowRight className="h-3 w-3" />
+        </Link>
+      )}
+    </div>
+  );
+}
+
+function ProcessFlow({ job }) {
+  if (!job) {
+    return (
+      <div className="text-center py-8 text-[12.5px] text-ink-400">
+        No active job right now. Start one from Planning & Orders.
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-0 overflow-x-auto pb-1">
+      {STAGE_META.map((sm, idx) => {
+        const stage = job.stages?.find((x) => x.stage === sm.key);
+        const status = stage?.status || 'pending';
+        const isActive = status === 'in_progress';
+        const isDone = status === 'completed';
+        const isPending = !isActive && !isDone;
+        return (
+          <div key={sm.key} className="flex items-center shrink-0">
+            <div className="flex flex-col items-center gap-1 min-w-[82px]">
+              <div className={clsx(
+                'w-[46px] h-[46px] rounded-lg grid place-items-center text-[18px] border-2 transition-all relative',
+                isDone && 'bg-state-running/10 border-state-running',
+                isActive && 'bg-brand-500/10 border-brand-500 ring-4 ring-brand-500/15',
+                isPending && 'bg-ink-50 border-ink-200 opacity-50',
+              )}>
+                {sm.icon}
+                {isDone && <span className="absolute -top-1 -right-1 text-[11px]">✓</span>}
+              </div>
+              <div className={clsx(
+                'text-[9.5px] uppercase tracking-wider font-bold text-center',
+                isDone && 'text-state-running',
+                isActive && 'text-brand-600',
+                isPending && 'text-ink-400',
+              )}>
+                {sm.label}
+              </div>
+              <div className="text-[10px] font-bold text-ink-700">
+                {stage?.weightOutKg ? `${stage.weightOutKg} kg` : stage?.weightInKg ? `${stage.weightInKg} kg` : '—'}
+              </div>
+              {isActive && <div className="text-[8.5px] font-bold text-brand-500 flex items-center gap-0.5">
+                <span className="inline-block h-1 w-1 rounded-full bg-brand-500 animate-pulse" /> Active
+              </div>}
+            </div>
+            {idx < STAGE_META.length - 1 && (
+              <div className="w-6 flex flex-col items-center">
+                <div className="h-0.5 w-full bg-ink-200 relative">
+                  <span className="absolute -right-1 -top-1.5 text-[8px] text-ink-400">▶</span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function Ring({ label, value, color }) {
+  const radius = 30;
+  const circumference = 2 * Math.PI * radius;
+  const offset = circumference - (value || 0) * circumference;
+  return (
+    <div className="flex flex-col items-center gap-1 py-1">
+      <div className="relative w-[76px] h-[76px]">
+        <svg width="76" height="76" viewBox="0 0 76 76" className="-rotate-90">
+          <circle cx="38" cy="38" r={radius} fill="none" stroke="#eaecf5" strokeWidth="7" />
+          <circle
+            cx="38" cy="38" r={radius}
+            fill="none"
+            stroke={color}
+            strokeWidth="7"
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            strokeLinecap="round"
+            style={{ transition: 'stroke-dashoffset 0.5s ease' }}
+          />
+        </svg>
+        <div className="absolute inset-0 grid place-items-center font-bold text-[15px] text-ink-900">
+          {Math.round((value || 0) * 100)}%
+        </div>
+      </div>
+      <div className="text-[9.5px] font-bold text-ink-400 uppercase tracking-wider">{label}</div>
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+ * Orders Awaiting Planning — replaces the old Live Activity feed.
+ *
+ * Shows up to 8 sales orders whose production hasn't started yet, sorted by:
+ *   1. Priority (high → medium → normal)
+ *   2. Due date (sooner first)
+ *
+ * Each row exposes a "Plan & Schedule" button that takes the manager to the
+ * Planning page where they can convert to a Job and assign operators.
+ * ══════════════════════════════════════════════════════════════════════ */
+function OrdersAwaitingPlanningPanel({ orders }) {
+  const priorityWeight = { high: 0, medium: 1, normal: 2 };
+  const awaiting = (orders || [])
+    .filter((o) => (o.productionStatus || 'notStarted') === 'notStarted')
+    .sort((a, b) => {
+      const pa = priorityWeight[a.priority || 'normal'];
+      const pb = priorityWeight[b.priority || 'normal'];
+      if (pa !== pb) return pa - pb;
+      const da = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+      const db = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+      return da - db;
+    })
+    .slice(0, 8);
+
+  return (
+    <div className="panel">
+      <div className="panel-header">
+        <div className="panel-title">
+          <ShoppingCart className="h-4 w-4 text-brand-500" />
+          Orders Awaiting Planning
+        </div>
+        <Link to="/sales-orders" className="text-[10.5px] text-brand-600 font-semibold hover:underline">
+          View all →
+        </Link>
+      </div>
+
+      {awaiting.length === 0 ? (
+        <div className="text-center py-8">
+          <div className="text-[28px] mb-1">✓</div>
+          <div className="text-[12.5px] text-ink-700 font-bold">All caught up!</div>
+          <div className="text-[11px] text-ink-400 mt-0.5">No orders waiting to be planned.</div>
+        </div>
+      ) : (
+        <div className="max-h-[320px] overflow-y-auto space-y-1.5">
+          {awaiting.map((so) => (
+            <AwaitingOrderRow key={so._id} order={so} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AwaitingOrderRow({ order }) {
+  const due = order.dueDate ? Math.ceil((new Date(order.dueDate) - new Date()) / 86400000) : null;
+  const priorityClass =
+    order.priority === 'high' ? 'border-l-state-down' :
+    order.priority === 'medium' ? 'border-l-state-idle' :
+    'border-l-state-running';
+  const lineCount = order.lines?.length || 0;
+  const firstLine = order.lines?.[0];
+
+  return (
+    <div className={clsx(
+      'rounded-md border border-ink-100 border-l-[3px] bg-white px-2.5 py-2 flex items-center gap-2',
+      priorityClass
+    )}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5 mb-0.5">
+          <span className="font-mono text-[11px] font-bold text-brand-600">{order.orderNumber}</span>
+          {order.priority === 'high' && (
+            <span className="chip-red text-[9px] font-bold">HIGH</span>
+          )}
+          {due !== null && due < 0 && (
+            <span className="chip-red text-[9px] font-bold">{Math.abs(due)}d OVERDUE</span>
+          )}
+          {due !== null && due >= 0 && due <= 3 && (
+            <span className="chip-yellow text-[9px] font-bold">{due}d LEFT</span>
+          )}
+        </div>
+        <div className="text-[12px] font-semibold text-ink-900 truncate">{order.customer}</div>
+        <div className="text-[10.5px] text-ink-500 truncate">
+          {firstLine?.productName} · {firstLine?.qty} {firstLine?.uom || 'kg'}
+          {lineCount > 1 && ` (+${lineCount - 1} more)`}
+        </div>
+      </div>
+      <Link
+        to="/sales-orders"
+        className="shrink-0 inline-flex items-center gap-1 bg-brand-500 hover:bg-brand-600 text-white text-[10.5px] font-bold px-2.5 py-1.5 rounded-md whitespace-nowrap"
+      >
+        <Calendar className="h-3 w-3" /> Plan
+      </Link>
+    </div>
+  );
+}

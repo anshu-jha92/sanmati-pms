@@ -1,0 +1,204 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme palette — space-separated RGB triplets so Tailwind opacity modifiers work.
+ * Light values match the original brand hex exactly. Dark mode flips the neutral
+ * "ink" ramp and swaps surfaces so every ink and brand class themes automatically. */
+:root {
+  --surface: 255 255 255;
+  --canvas: 240 243 250;
+  --brand-50: 239 244 255;  --brand-100: 217 230 255; --brand-200: 176 202 255; --brand-300: 125 167 255;
+  --brand-400: 79 141 255;  --brand-500: 26 107 255;  --brand-600: 0 80 217;    --brand-700: 0 63 174;
+  --brand-800: 0 54 137;    --brand-900: 0 44 110;
+  --cyan-400: 34 211 238;   --cyan-500: 6 182 212;     --cyan-600: 8 145 178;
+  --ink-50: 245 247 253;    --ink-100: 234 236 245;   --ink-200: 226 230 240;   --ink-300: 197 204 224;
+  --ink-400: 136 150 180;   --ink-500: 86 102 130;    --ink-600: 68 80 112;     --ink-700: 47 55 77;
+  --ink-800: 28 34 51;      --ink-900: 13 21 38;
+  --state-running: 5 150 105;    --state-idle: 217 119 6;   --state-maintenance: 124 58 237;
+  --state-down: 220 38 38;       --state-offline: 136 150 180;
+  --statebg-running: 236 253 245; --statebg-idle: 255 251 235; --statebg-maintenance: 245 243 255;
+  --statebg-down: 255 241 242;    --statebg-offline: 245 247 253;
+  color-scheme: light;
+}
+
+.dark {
+  --surface: 22 28 42;
+  --canvas: 11 15 24;
+  /* Brand: lighten the darker "text" shades so they read on dark surfaces */
+  --brand-600: 96 156 255;  --brand-700: 125 167 255;
+  /* Neutral ramp flipped: ink-50 = subtle dark bg … ink-900 = near-white text */
+  --ink-50: 24 30 45;       --ink-100: 32 40 58;      --ink-200: 42 51 72;      --ink-300: 60 72 99;
+  --ink-400: 122 137 168;   --ink-500: 152 166 195;   --ink-600: 180 191 214;   --ink-700: 205 213 230;
+  --ink-800: 224 229 240;   --ink-900: 240 243 250;
+  --statebg-running: 12 40 30; --statebg-idle: 46 34 12; --statebg-maintenance: 34 24 56;
+  --statebg-down: 48 20 24;    --statebg-offline: 32 40 58;
+  color-scheme: dark;
+}
+
+@layer base {
+  html { font-size: 14px; }
+  html, body, #root { height: 100%; }
+  body {
+    background: rgb(var(--canvas));
+    color: rgb(var(--ink-900));
+    font-feature-settings: "cv02","cv03","cv04","cv11";
+  }
+  /* Component-level literal `bg-white` (in JSX) flips to the themed surface. */
+  .dark .bg-white { background-color: rgb(var(--surface)); }
+  /* Subtle grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(26,107,255,0.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(26,107,255,0.018) 1px, transparent 1px);
+    background-size: 36px 36px;
+    pointer-events: none;
+    z-index: 0;
+  }
+  button:focus-visible, a:focus-visible, [role="button"]:focus-visible {
+    @apply outline-none ring-2 ring-brand-500 ring-offset-2 ring-offset-ink-50;
+  }
+}
+
+@layer components {
+  /* Cards */
+  .card {
+    @apply rounded-xl bg-surface border border-ink-200 shadow-card;
+  }
+  .card-header {
+    @apply px-4 py-3.5 border-b border-ink-100 flex items-center justify-between;
+  }
+  .card-body { @apply p-4; }
+
+  .panel {
+    @apply bg-surface border border-ink-200 rounded-xl shadow-card p-4;
+  }
+  .panel-header {
+    @apply flex items-center justify-between mb-3.5;
+  }
+  .panel-title {
+    @apply text-[13px] font-bold text-ink-900 flex items-center gap-1.5;
+  }
+
+  /* Stat cards — accent bar on top */
+  .stat-card {
+    @apply bg-surface border border-ink-200 rounded-xl p-4 relative overflow-hidden shadow-card transition-all hover:-translate-y-px hover:shadow-cardHov;
+  }
+  .stat-card::before {
+    content: '';
+    @apply absolute top-0 left-0 right-0 h-[3px];
+    background: var(--accent, #1a6bff);
+  }
+  .stat-card.accent-green  { --accent: #059669; }
+  .stat-card.accent-blue   { --accent: #1a6bff; }
+  .stat-card.accent-yellow { --accent: #d97706; }
+  .stat-card.accent-purple { --accent: #7c3aed; }
+  .stat-card.accent-red    { --accent: #dc2626; }
+  .stat-card.accent-orange { --accent: #ea580c; }
+  .stat-card.accent-cyan   { --accent: #0891b2; }
+
+  .sc-label { @apply text-[10px] text-ink-400 uppercase tracking-wider mb-1.5 font-semibold; }
+  .sc-val   { @apply font-bold text-[22px] text-ink-900 leading-none mb-1.5; }
+  .sc-meta  { @apply text-[11px] text-ink-400 flex items-center gap-1; }
+  .sc-up    { @apply text-state-running font-bold; }
+  .sc-dn    { @apply text-state-down font-bold; }
+
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-[12.5px] font-semibold transition cursor-pointer;
+  }
+  .btn-primary   { @apply btn bg-brand-500 text-white shadow-brand hover:bg-brand-600; }
+  .btn-secondary { @apply btn bg-surface text-ink-700 border border-ink-200 hover:bg-ink-50; }
+  .btn-danger    { @apply btn bg-state-down text-white hover:brightness-95; }
+  .btn-ghost     { @apply btn hover:bg-ink-100 text-ink-600; }
+  .btn-sm        { @apply text-[11.5px] px-2.5 py-1.5; }
+
+  /* Inputs */
+  .input {
+    @apply block w-full rounded-lg border-0 bg-surface px-3 py-2 text-sm text-ink-900
+           ring-1 ring-inset ring-ink-200 placeholder:text-ink-400
+           focus:ring-2 focus:ring-brand-500 focus:outline-none;
+  }
+  .label { @apply block text-[10.5px] font-semibold text-ink-500 uppercase tracking-wider mb-1; }
+
+  /* Tables */
+  .table { @apply min-w-full divide-y divide-ink-100 text-[12.5px]; }
+  .th {
+    @apply px-3.5 py-2.5 text-left font-bold text-ink-500 bg-ink-50 text-[10.5px] uppercase tracking-wider;
+  }
+  .td { @apply px-3.5 py-2.5 align-middle; }
+  .tr-hover { @apply hover:bg-ink-50/60; }
+
+  /* Chips / pills */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold;
+  }
+  .chip-green  { @apply chip bg-state-running/10 text-state-running; }
+  .chip-yellow { @apply chip bg-state-idle/10 text-state-idle; }
+  .chip-red    { @apply chip bg-state-down/10 text-state-down; }
+  .chip-purple { @apply chip bg-state-maintenance/10 text-state-maintenance; }
+  .chip-blue   { @apply chip bg-brand-500/10 text-brand-500; }
+  .chip-gray   { @apply chip bg-ink-100 text-ink-600; }
+
+  /* Pulse indicator */
+  .pulse-dot {
+    @apply w-2 h-2 rounded-full bg-state-running animate-pulse-dot;
+  }
+
+  /* Machine card — colored left border */
+  .mc-card {
+    @apply bg-surface border border-ink-200 rounded-xl p-3.5 cursor-pointer shadow-card transition-all hover:-translate-y-px hover:shadow-cardHov block;
+  }
+  .mc-card.mc-running     { @apply border-l-4 border-l-state-running; }
+  .mc-card.mc-idle        { @apply border-l-4 border-l-state-idle; }
+  .mc-card.mc-maintenance { @apply border-l-4 border-l-state-maintenance; }
+  .mc-card.mc-down        { @apply border-l-4 border-l-state-down; }
+  .mc-card.mc-offline     { @apply border-l-4 border-l-state-offline; }
+
+  .mc-metric {
+    @apply bg-ink-50 rounded-md py-1.5 px-2 text-center border border-ink-200;
+  }
+  .mc-metric-val { @apply font-bold text-[13px] text-ink-900; }
+  .mc-metric-lbl { @apply text-[8.5px] text-ink-400 uppercase tracking-wider mt-0.5; }
+
+  /* Sidebar nav */
+  .nav-link {
+    @apply flex items-center gap-2.5 px-3 py-2 rounded-lg text-[12.5px] font-medium text-ink-600
+           transition hover:bg-ink-100 hover:text-ink-900 relative;
+  }
+  .nav-link.active {
+    @apply bg-brand-500/10 text-brand-600 font-semibold;
+  }
+  .nav-link.active::before {
+    content: '';
+    @apply absolute left-0 top-1.5 bottom-1.5 w-[3px] rounded-r bg-brand-500;
+  }
+  .nav-section-label {
+    @apply px-3 pt-4 pb-1 text-[9px] uppercase tracking-wider font-bold text-ink-400;
+  }
+  .nav-badge {
+    @apply ml-auto text-[9.5px] font-bold rounded-full px-1.5 py-0.5;
+  }
+
+  /* Live feed */
+  .feed-item {
+    @apply flex items-start gap-2.5 py-2.5 border-b border-ink-100 last:border-0;
+  }
+  .feed-dot {
+    @apply w-2 h-2 rounded-full mt-1.5 flex-shrink-0;
+  }
+  .feed-msg { @apply flex-1 text-[12px] text-ink-700 leading-snug; }
+  .feed-time { @apply text-[10px] text-ink-400 flex-shrink-0 tabular-nums; }
+
+  /* Alert list items */
+  .alert-item {
+    @apply flex items-start gap-2.5 p-3 rounded-lg border mb-2 text-[12px];
+  }
+  .alert-item.ai-crit { @apply bg-statebg-down border-state-down/30; }
+  .alert-item.ai-warn { @apply bg-statebg-idle border-state-idle/30; }
+  .alert-item.ai-info { @apply bg-brand-50 border-brand-200; }
+  .alert-item.ai-sugg { @apply bg-statebg-running border-state-running/30; }
+}
