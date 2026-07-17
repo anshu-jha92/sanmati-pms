@@ -14,16 +14,16 @@
  * so the layout stays stable as data fills in.
  */
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import clsx from 'clsx';
 import {
   Activity, Gauge, Thermometer, Clock, TrendingUp, Droplet,
   Settings, RefreshCw, Search, BarChart3, CheckCircle,
-  Factory, AlertCircle,
+  Factory, AlertCircle, CalendarRange, RotateCcw,
 } from 'lucide-react';
-import { machineApi } from '../api/endpoints.js';
+import { machineApi, downtimeApi } from '../api/endpoints.js';
 import { authStore } from '../context/authStore.js';
 
 /* ────────────────────────────────────────────────────────────────
@@ -118,14 +118,39 @@ const STATE_META = {
   offline:     { label: 'Machine Disconnected', dot: 'bg-ink-400',     cls: 'bg-ink-100          text-ink-600         border-ink-200' },
 };
 
+const STATES = ['running', 'idle', 'down', 'maintenance', 'offline'];
+
+/** "2026-07-07T14:00" → "7 Jul 2026, 2:00 pm" */
+function fmtStamp(iso) {
+  return new Date(iso).toLocaleString('en-IN', {
+    day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
+  });
+}
+
 export function MachinesPage() {
   const user = authStore((s) => s.user);
   const [filters, setFilters] = useState({ q: '', stage: '', status: '' });
 
+  // ── History range (date + time). When applied, the page switches from LIVE
+  // (current state) to HISTORY (which machines were in a state during the window).
+  const [fromDate, setFromDate] = useState('');
+  const [fromTime, setFromTime] = useState('');
+  const [toDate, setToDate] = useState('');
+  const [toTime, setToTime] = useState('');
+  const [range, setRange] = useState(null);   // { from, to } ISO once applied
+  const [rangeErr, setRangeErr] = useState('');
+
   const { data, isLoading, isFetching, refetch } = useQuery({
     queryKey: ['machines', 'live', user?.plantId],
     queryFn: async () => (await machineApi.live(user?.plantId)).data,
-    refetchInterval: 5_000,           // 5s polling — image showed "Live 3s"
+    refetchInterval: range ? false : 5_000,   // pause live polling while viewing history
+  });
+
+  // Per-machine seconds in each state, clipped to the window. READ-ONLY endpoint.
+  const historyQ = useQuery({
+    queryKey: ['machines', 'range', range?.from, range?.to, user?.plantId],
+    queryFn: async () => (await downtimeApi.summary({ from: range.from, to: range.to, plantId: user?.plantId })).data,
+    enabled: !!range,
   });
 
   // Note: We rely on React Query's 5-second refetchInterval for live
@@ -137,22 +162,62 @@ export function MachinesPage() {
 
   const machines = data || [];
 
+  // code → { running, idle, down, maintenance, offline } seconds inside the window
+  const rangeByCode = useMemo(() => {
+    const rows = historyQ.data?.machines || [];
+    return Object.fromEntries(rows.map((r) => [r.code, r]));
+  }, [historyQ.data]);
+
+  const applyRange = () => {
+    if (!fromDate || !toDate) { setRangeErr('Select both From and To dates.'); return; }
+    const from = new Date(`${fromDate}T${fromTime || '00:00'}`);
+    const to = new Date(`${toDate}T${toTime || '23:59'}`);
+    if (!(from < to)) { setRangeErr('“From” must be earlier than “To”.'); return; }
+    setRangeErr('');
+    setRange({ from: from.toISOString(), to: to.toISOString() });
+  };
+
+  const resetLive = () => {
+    setRange(null); setRangeErr('');
+    setFromDate(''); setFromTime(''); setToDate(''); setToTime('');
+  };
+
   const filtered = machines.filter((m) => {
     if (filters.stage && m.stage !== filters.stage) return false;
-    if (filters.status && m.currentStatus?.state !== filters.status) return false;
     if (filters.q) {
       const q = filters.q.toLowerCase();
       if (!`${m.code} ${m.name}`.toLowerCase().includes(q)) return false;
     }
+    if (range) {
+      // HISTORY: was this machine in the chosen state at any point in the window?
+      const r = rangeByCode[m.code];
+      if (!r) return false;
+      if (filters.status) return (r[filters.status] || 0) > 0;
+      return STATES.some((s) => (r[s] || 0) > 0);   // any tracked activity
+    }
+    // LIVE: filter on the current state
+    if (filters.status && (m.currentStatus?.state || 'offline') !== filters.status) return false;
     return true;
   });
 
-  // Counts by state for the filter pills
-  const counts = machines.reduce((acc, m) => {
-    const s = m.currentStatus?.state || 'offline';
-    acc[s] = (acc[s] || 0) + 1;
+  // Counts per state — live = machines currently in it; history = machines that
+  // spent ANY time in it during the window.
+  const counts = useMemo(() => {
+    const acc = {};
+    if (range) {
+      for (const m of machines) {
+        const r = rangeByCode[m.code];
+        if (!r) continue;
+        for (const s of STATES) if ((r[s] || 0) > 0) acc[s] = (acc[s] || 0) + 1;
+      }
+    } else {
+      for (const m of machines) {
+        const s = m.currentStatus?.state || 'offline';
+        acc[s] = (acc[s] || 0) + 1;
+      }
+    }
     return acc;
-  }, {});
+  }, [machines, range, rangeByCode]);
 
   return (
     <div className="space-y-4">
@@ -160,12 +225,25 @@ export function MachinesPage() {
       <div className="flex items-end justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-[20px] font-bold text-ink-900">Machines</h1>
-          <div className="text-[11.5px] text-ink-500 mt-0.5 flex items-center gap-2">
-            Showing <strong className="text-ink-700">{filtered.length}</strong> machine{filtered.length !== 1 ? 's' : ''}
-            <span className="inline-flex items-center gap-1 text-state-running font-semibold">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-state-running animate-pulse" />
-              Live 5s
-            </span>
+          <div className="text-[11.5px] text-ink-500 mt-0.5 flex items-center gap-2 flex-wrap">
+            Showing <strong className="text-ink-700">{filtered.length}</strong> of {machines.length} machine{machines.length !== 1 ? 's' : ''}
+            {range ? (
+              <>
+                <span className="inline-flex items-center gap-1 text-brand-600 font-semibold">
+                  <CalendarRange className="h-3 w-3" />
+                  History: {fmtStamp(range.from)} → {fmtStamp(range.to)}
+                </span>
+                <button onClick={resetLive} className="text-brand-600 font-bold underline hover:no-underline">
+                  Reset to live
+                </button>
+                {historyQ.isFetching && <span className="text-ink-400">loading…</span>}
+              </>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-state-running font-semibold">
+                <span className="inline-block h-1.5 w-1.5 rounded-full bg-state-running animate-pulse" />
+                Live 5s
+              </span>
+            )}
           </div>
         </div>
         <button
@@ -179,66 +257,104 @@ export function MachinesPage() {
       </div>
 
       {/* Filter bar */}
-      <div className="card p-3 flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
-          <input
-            placeholder="Search by code or name…"
-            value={filters.q}
-            onChange={(e) => setFilters({ ...filters, q: e.target.value })}
-            className="input pl-9 py-1.5 text-[13px]"
-          />
+      <div className="card p-3 space-y-2">
+        {/* Row 1 — search · stage · status */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-ink-400" />
+            <input
+              placeholder="Search by code or name…"
+              value={filters.q}
+              onChange={(e) => setFilters({ ...filters, q: e.target.value })}
+              className="input pl-9 py-1.5 text-[13px]"
+            />
+          </div>
+
+          <select
+            value={filters.stage}
+            onChange={(e) => setFilters({ ...filters, stage: e.target.value })}
+            className="input py-1.5 text-[13px] w-full sm:w-auto"
+          >
+            <option value="">All stages</option>
+            {Object.entries(STAGE_CONFIG).map(([k, v]) => (
+              <option key={k} value={k}>{v.label}</option>
+            ))}
+          </select>
+
+          <select
+            value={filters.status}
+            onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+            className="input py-1.5 text-[13px] w-full sm:w-auto"
+          >
+            <option value="">All statuses</option>
+            {STATES.map((s) => (
+              <option key={s} value={s}>
+                {STATE_META[s].label}{counts[s] ? ` (${counts[s]})` : ''}
+              </option>
+            ))}
+          </select>
         </div>
 
-        <select
-          value={filters.stage}
-          onChange={(e) => setFilters({ ...filters, stage: e.target.value })}
-          className="input py-1.5 text-[13px] w-auto"
-        >
-          <option value="">All stages</option>
-          {Object.entries(STAGE_CONFIG).map(([k, v]) => (
-            <option key={k} value={k}>{v.label}</option>
-          ))}
-        </select>
+        {/* Row 2 — date + time range (history) */}
+        <div className="flex items-end gap-2 flex-wrap border-t border-ink-100 pt-2">
+          <div>
+            <label className="block text-[10px] font-bold uppercase text-ink-500 tracking-wider mb-1">From</label>
+            <div className="flex items-center gap-1.5">
+              <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)}
+                className="input py-1.5 text-[12px] w-auto" />
+              <input type="time" value={fromTime} onChange={(e) => setFromTime(e.target.value)} disabled={!fromDate}
+                title={fromDate ? 'Start time' : 'Pick the From date first'}
+                className="input py-1.5 text-[12px] w-auto disabled:opacity-50 disabled:cursor-not-allowed" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-[10px] font-bold uppercase text-ink-500 tracking-wider mb-1">To</label>
+            <div className="flex items-center gap-1.5">
+              <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)}
+                className="input py-1.5 text-[12px] w-auto" />
+              <input type="time" value={toTime} onChange={(e) => setToTime(e.target.value)} disabled={!toDate}
+                title={toDate ? 'End time' : 'Pick the To date first'}
+                className="input py-1.5 text-[12px] w-auto disabled:opacity-50 disabled:cursor-not-allowed" />
+            </div>
+          </div>
 
-        {/* Status filter as pills */}
-        <div className="flex items-center gap-1 flex-wrap">
-          {['running', 'idle', 'down', 'maintenance', 'offline'].map((s) => {
-            const c = counts[s] || 0;
-            const meta = STATE_META[s];
-            const active = filters.status === s;
-            return (
-              <button
-                key={s}
-                onClick={() => setFilters({ ...filters, status: active ? '' : s })}
-                className={clsx(
-                  'px-2.5 py-1 rounded-md text-[10.5px] font-bold border transition',
-                  active ? meta.cls + ' ring-2 ring-offset-1 ring-current/30' :
-                  c > 0 ? meta.cls + ' opacity-80 hover:opacity-100' :
-                  'bg-ink-50 text-ink-400 border-ink-200'
-                )}
-              >
-                <span className={clsx('inline-block h-1.5 w-1.5 rounded-full mr-1', meta.dot)} />
-                {meta.label} {c > 0 && `· ${c}`}
-              </button>
-            );
-          })}
+          <button onClick={applyRange} className="btn-primary text-[12px] py-1.5 px-3 inline-flex items-center gap-1.5">
+            <CalendarRange className="h-3.5 w-3.5" /> Apply range
+          </button>
+          {range && (
+            <button onClick={resetLive} className="btn-secondary text-[12px] py-1.5 px-3 inline-flex items-center gap-1.5">
+              <RotateCcw className="h-3.5 w-3.5" /> Reset to live
+            </button>
+          )}
+          {rangeErr && <span className="text-[11px] text-state-down font-semibold">{rangeErr}</span>}
+
+          <div className="ml-auto text-[10.5px] text-ink-400 max-w-[320px]">
+            {range
+              ? (filters.status
+                  ? <>Showing machines that were <b className="text-ink-600">{STATE_META[filters.status].label}</b> at any point in this window.</>
+                  : <>Showing machines with activity in this window. Pick a status to narrow it down.</>)
+              : <>Pick a date + time range to see which machines were running in that period.</>}
+          </div>
         </div>
       </div>
 
       {/* Grid of cards */}
-      {isLoading ? (
+      {isLoading || (range && historyQ.isLoading) ? (
         <div className="card p-10 text-center text-[13px] text-ink-400">Loading machines…</div>
       ) : filtered.length === 0 ? (
         <div className="card p-10 text-center">
           <Factory className="h-10 w-10 mx-auto text-ink-300 mb-2" />
           <div className="font-bold text-[14px] text-ink-900">No machines match your filters</div>
-          <div className="text-[11.5px] text-ink-500 mt-1">Try clearing search or status filters.</div>
+          <div className="text-[11.5px] text-ink-500 mt-1">
+            {range
+              ? <>No machine was <b>{filters.status ? STATE_META[filters.status].label : 'active'}</b> between {fmtStamp(range.from)} and {fmtStamp(range.to)}. Try a wider range or a different status.</>
+              : 'Try clearing search or status filters.'}
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {filtered.map((m) => (
-            <MachineCard key={m._id} machine={m} />
+            <MachineCard key={m._id} machine={m} rangeStats={range ? rangeByCode[m.code] : null} />
           ))}
         </div>
       )}
@@ -257,7 +373,7 @@ export function MachinesPage() {
  *   5. Assignment block: job, operator
  *   6. Footer: Details / History links
  * ══════════════════════════════════════════════════════════════ */
-function MachineCard({ machine }) {
+function MachineCard({ machine, rangeStats = null }) {
   const navigate = useNavigate();
   const cfg = STAGE_CONFIG[machine.stage] || DEFAULT_STAGE;
   const status = machine.currentStatus || {};
@@ -391,13 +507,16 @@ function MachineCard({ machine }) {
       </div>
       )}
 
-      {/* Today's state totals — Running / Idle / Down — always visible,
-          even when device hasn't POSTed metrics. Powered by MachineStatus
-          intervals on the backend. */}
+      {/* State totals — Running / Idle / Down. Shows TODAY in live mode, or the
+          time spent in each state inside the selected window in history mode.
+          Powered by MachineStatus intervals on the backend. */}
+      <div className="px-4 pb-1 text-[9px] font-bold uppercase tracking-wider text-ink-400">
+        {rangeStats ? 'In selected range' : 'Today'}
+      </div>
       <div className="px-4 pb-3 grid grid-cols-3 gap-2">
-        <DailyTile label="Running" seconds={daily.running || 0} color="#059669" />
-        <DailyTile label="Idle" seconds={daily.idle || 0} color="#d97706" />
-        <DailyTile label="Down" seconds={daily.down || 0} color="#dc2626" />
+        <DailyTile label="Running" seconds={(rangeStats || daily).running || 0} color="#059669" />
+        <DailyTile label="Idle" seconds={(rangeStats || daily).idle || 0} color="#d97706" />
+        <DailyTile label="Down" seconds={(rangeStats || daily).down || 0} color="#dc2626" />
       </div>
 
       {/* Batch count — only shown if device reports both a counter and

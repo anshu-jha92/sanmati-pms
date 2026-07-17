@@ -26,6 +26,8 @@ import {
   HardHat,
   Menu,
   X,
+  Network,
+  Building2,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useEffect, useRef, useState } from 'react';
@@ -68,6 +70,8 @@ const NAV_GROUPS = [
   { label: 'Admin', items: [
     { to: '/integrations', label: 'Integrations', icon: Plug,        perm: ['integrations', 'view'] },
     { to: '/employees',    label: 'Employees',    icon: Users,       perm: ['employees', 'view'] },
+    { to: '/org-chart',    label: 'Org Chart',    icon: Network,     perm: ['employees', 'view'] },
+    { to: '/departments',  label: 'Departments',  icon: Building2,   perm: ['employees', 'view'] },
     { to: '/teams',        label: 'Teams',        icon: UsersRound,  perm: ['teams', 'view'] },
     { to: '/roles',        label: 'Roles & Permissions', icon: KeyRound,    perm: ['roles', 'view'] },
     { to: '/settings',     label: 'Settings',     icon: SettingsIcon, perm: null },

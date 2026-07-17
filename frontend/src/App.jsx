@@ -39,6 +39,8 @@ import { TeamsPage } from './pages/TeamsPage.jsx';
 import { RolesPage } from './pages/RolesPage.jsx';
 import { SettingsPage } from './pages/SettingsPage.jsx';
 import { ReportsPage } from './pages/ReportsPage.jsx';
+import { DepartmentsPage, DepartmentDetailPage } from './pages/DepartmentsPage.jsx';
+import { OrgChartPage, OrgPersonPage } from './pages/OrgChartPage.jsx';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -97,6 +99,12 @@ export default function App() {
             <Route path="integrations" element={<RequirePerm module="integrations"><IntegrationsPage /></RequirePerm>} />
             <Route path="employees"    element={<RequirePerm module="employees"><EmployeesPage /></RequirePerm>} />
             <Route path="teams"        element={<RequirePerm module="teams"><TeamsPage /></RequirePerm>} />
+
+            {/* Org structure — read-only views derived from employees + machines */}
+            <Route path="org-chart"       element={<RequirePerm module="employees"><OrgChartPage /></RequirePerm>} />
+            <Route path="org-chart/:id"   element={<RequirePerm module="employees"><OrgPersonPage /></RequirePerm>} />
+            <Route path="departments"     element={<RequirePerm module="employees"><DepartmentsPage /></RequirePerm>} />
+            <Route path="departments/:key" element={<RequirePerm module="employees"><DepartmentDetailPage /></RequirePerm>} />
             <Route path="roles"        element={<RequirePerm module="roles"><RolesPage /></RequirePerm>} />
 
             {/* Personal settings — available to every signed-in user */}

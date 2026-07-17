@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
  * JobOrder — a single production job derived from a SalesOrder line.
  *
  * A JobOrder of, say, "100 KG Printed Polybag" will spawn a sequence of
- * StageExecution records as it passes through:
+ * StageExecution records as it passes through: 
  *   Printing → Inspection → Lamination → Hot Room → Slitting → Cutting → Packaging
  *
  * Each StageExecution records:

@@ -152,7 +152,7 @@ export const updateUser = asyncHandler(async (req, res) => {
 const teamSchema = z.object({
   name: z.string().min(1),
   slug: z.string().min(1).regex(/^[a-z0-9_-]+$/),
-  type: z.enum(['production', 'qc', 'dispatch', 'maintenance', 'planning', 'other']),
+  type: z.enum(['production', 'qc', 'planning', 'store', 'purchase', 'sales', 'dispatch', 'maintenance', 'administration', 'other']),
   leader: z.string().optional(),
   plantId: z.string().nullish(),
   description: z.string().optional(),

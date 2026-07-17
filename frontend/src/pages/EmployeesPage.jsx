@@ -1,10 +1,13 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Link } from 'react-router-dom';
 import { Plus, Pencil, Power, RotateCcw, Trash2 } from 'lucide-react';
 import clsx from 'clsx';
-import { adminApi } from '../api/endpoints.js';
+import { adminApi, machineApi } from '../api/endpoints.js';
 import { authStore } from '../context/authStore.js';
 import { BLUEPRINT_ROLES, blueprintPermissions } from '../lib/roleBlueprint.js';
+import { reportsTo, machinesOfPerson } from '../lib/orgModel.js';
+import { Avatar } from './DepartmentsPage.jsx';
 import { Card, StatusPill, ErrorNote } from '../components/ui/Primitives.jsx';
 import { DataTable, Pagination } from '../components/ui/DataTable.jsx';
 import { FilterBar } from '../components/ui/FilterBar.jsx';
@@ -19,6 +22,20 @@ export function EmployeesPage() {
 
   const roles = useQuery({ queryKey: ['roles'], queryFn: async () => (await adminApi.listRoles()).data });
   const teams = useQuery({ queryKey: ['teams'], queryFn: async () => (await adminApi.listTeams()).data });
+
+  // Read-only extras that power the Reports-to and Machines columns.
+  // allUsers (unpaginated) is needed because a manager may sit on another page.
+  const allUsers = useQuery({
+    queryKey: ['org', 'users'],
+    queryFn: async () => (await adminApi.listUsers({ limit: 200 })).data,
+  });
+  const plantId = authStore((s) => s.user?.plantId);
+  const machinesQ = useQuery({
+    queryKey: ['machines', 'live', plantId],
+    queryFn: async () => (await machineApi.live(plantId)).data,
+    refetchInterval: 15_000,
+    retry: false,
+  });
 
   // Every assignable role: the full org blueprint plus any custom DB-only roles.
   // Blueprint roles not yet in the DB carry dbId=null and are created on assign.
@@ -56,10 +73,65 @@ export function EmployeesPage() {
   });
 
   const columns = [
-    { key: 'employeeCode', label: 'Code', render: (r) => <span className="font-mono text-xs">{r.employeeCode}</span> },
-    { key: 'name', label: 'Name' },
-    { key: 'email', label: 'Email' },
-    { key: 'roles', label: 'Roles', render: (r) => (r.roles || []).map((x) => x.name).join(', ') || '—' },
+    {
+      key: 'employeeCode',
+      label: 'Code',
+      render: (r) => (
+        <div className="flex flex-col items-center gap-1 w-14">
+          <Avatar user={r} size={34} />
+          <span className="font-mono text-[10px] text-ink-500 leading-none">{r.employeeCode || '—'}</span>
+        </div>
+      ),
+    },
+    {
+      key: 'name',
+      label: 'Name',
+      render: (r) => (
+        <Link to={`/org-chart/${r._id}`} title="Open in org chart"
+          className="font-semibold text-[13px] text-ink-900 hover:text-brand-600 transition">
+          {r.name}
+        </Link>
+      ),
+    },
+    { key: 'email', label: 'Email', render: (r) => <span className="text-[12px] text-ink-600">{r.email}</span> },
+    {
+      key: 'roles',
+      label: 'Roles',
+      render: (r) => {
+        const list = r.roles || [];
+        if (!list.length) return <span className="text-ink-300">—</span>;
+        return (
+          <div className="flex flex-wrap gap-1">
+            {list.map((x) => <span key={x._id || x.slug} className="chip-blue text-[10px] whitespace-nowrap">{x.name}</span>)}
+          </div>
+        );
+      },
+    },
+    {
+      key: 'reportsTo',
+      label: 'Reports to',
+      render: (r) => {
+        const rt = reportsTo(r, allUsers.data || []);
+        if (!rt) return <span className="text-ink-300">—</span>;
+        return rt.user ? (
+          <Link to={`/org-chart/${rt.user._id}`} className="text-[12px] font-medium text-ink-800 hover:text-brand-600 transition">
+            {rt.user.name}
+          </Link>
+        ) : (
+          <span className="text-[11px] text-ink-400" title="Role is vacant or held by several people">{rt.role.name}</span>
+        );
+      },
+    },
+    {
+      key: 'machines',
+      label: 'Machines',
+      render: (r) => {
+        const n = machinesOfPerson(r, machinesQ.data || []).length;
+        return n > 0
+          ? <span className="tabular-nums font-semibold text-[12.5px] text-ink-900">{n}</span>
+          : <span className="tabular-nums text-ink-300">0</span>;
+      },
+    },
     { key: 'teams', label: 'Teams', render: (r) => (r.teams || []).map((x) => x.name).join(', ') || '—' },
     { key: 'shift', label: 'Shift' },
     { key: 'status', label: 'Status', render: (r) => <StatusPill status={r.status} /> },
@@ -205,15 +277,28 @@ function EmployeeFormModal({ mode, user, onClose, roleOptions, teams }) {
   });
   const [err, setErr] = useState('');
 
-  // Real-time validation — drives Save button enable/disable
+  // Real-time validation — drives Save button enable/disable.
+  // NOTE: Teams is intentionally NOT required — a Plant Head / GM (or any
+  // leadership role) doesn't belong to a shop-floor team. The API agrees:
+  // `teams` defaults to [] server-side.
   const passwordOk = isEdit ? (form.password.length === 0 || form.password.length >= 8) : form.password.length >= 8;
+  const emailOk = /^\S+@\S+\.\S+$/.test(form.email);
   const canSubmit = (
     form.employeeCode.trim().length > 0 &&
     form.name.trim().length > 0 &&
-    /^\S+@\S+\.\S+$/.test(form.email) &&
+    emailOk &&
     passwordOk &&
     form.roles.length > 0
   );
+
+  // Spell out exactly what's still blocking Save, so the button is never
+  // mysteriously dead and nobody has to guess (e.g. blame the Teams field).
+  const missing = [];
+  if (!form.employeeCode.trim()) missing.push('employee code');
+  if (!form.name.trim()) missing.push('name');
+  if (!emailOk) missing.push('a valid email');
+  if (!passwordOk) missing.push('a password of 8+ characters');
+  if (form.roles.length === 0) missing.push('at least one role');
 
   const mut = useMutation({
     mutationFn: async () => {
@@ -294,7 +379,16 @@ function EmployeeFormModal({ mode, user, onClose, roleOptions, teams }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <Field label="Employee code" required value={form.employeeCode} onChange={(v) => setForm({ ...form, employeeCode: v })} />
           <Field label="Name" required value={form.name} onChange={(v) => setForm({ ...form, name: v })} />
-          <Field label="Email" type="email" required value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
+          <div>
+            <Field label="Email" type="email" required value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
+            <div className={`text-[10px] mt-1 ${form.email.length > 0 && !emailOk ? 'text-state-down' : 'text-ink-400'}`}>
+              {form.email.length === 0
+                ? 'e.g. name@company.com'
+                : emailOk
+                  ? '✓ OK'
+                  : 'Needs a full address — e.g. name@company.com'}
+            </div>
+          </div>
           <Field label="Phone" value={form.phone} onChange={(v) => setForm({ ...form, phone: v })} />
           <div>
             <Field
@@ -319,7 +413,12 @@ function EmployeeFormModal({ mode, user, onClose, roleOptions, teams }) {
             </select>
           </label>
           <RolePicker value={form.roles} onChange={(v) => setForm({ ...form, roles: v })} options={roleOptions} />
-          <MultiSelect label="Teams" value={form.teams} onChange={(v) => setForm({ ...form, teams: v })} options={teams.map((t) => ({ value: t._id, label: t.name }))} />
+          <div>
+            <MultiSelect label="Teams (optional)" value={form.teams} onChange={(v) => setForm({ ...form, teams: v })} options={teams.map((t) => ({ value: t._id, label: t.name }))} />
+            <div className="text-[10px] text-ink-400 mt-1">
+              Not required — leadership roles like Plant Head / GM don’t need a team.
+            </div>
+          </div>
 
           {isEdit && (
             <label className="col-span-2">
@@ -339,7 +438,12 @@ function EmployeeFormModal({ mode, user, onClose, roleOptions, teams }) {
 
         <ErrorNote message={err} />
 
-        <div className="flex justify-end gap-2 pt-2">
+        <div className="flex items-center justify-end gap-2 pt-2 flex-wrap">
+          {!canSubmit && missing.length > 0 && (
+            <span className="mr-auto text-[11px] text-ink-500">
+              Still needed: <b className="text-state-down">{missing.join(', ')}</b>
+            </span>
+          )}
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
           <button
             type="submit"

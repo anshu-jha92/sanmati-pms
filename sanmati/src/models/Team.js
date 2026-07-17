@@ -6,7 +6,9 @@ const teamSchema = new mongoose.Schema(
     slug: { type: String, required: true, lowercase: true, trim: true },
     type: {
       type: String,
-      enum: ['production', 'qc', 'dispatch', 'maintenance', 'planning', 'other'],
+      // One per org department (see frontend roleBlueprint.js) + 'other'.
+      // Additive only — every previously stored value is still valid.
+      enum: ['production', 'qc', 'planning', 'store', 'purchase', 'sales', 'dispatch', 'maintenance', 'administration', 'other'],
       required: true,
       index: true,
     },
