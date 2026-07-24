@@ -33,11 +33,6 @@ export function buildRouter() {
   authRouter.patch('/profile', authenticate, auth.updateProfile);
   root.use('/auth', authRouter);
 
-  // ════════════════════ DEBUG (PUBLIC — no auth) ════════════════════
-  // Diagnostic endpoints for troubleshooting. Safe to expose because they only
-  // return read-only state. Remove these routes in production.
-  root.get('/inventory/debug', inventory.debugInventory);
-
   // Everything else requires auth + general API rate limit
   const api = Router();
   api.use(apiLimiter, authenticate);

@@ -1,3 +1,11 @@
+# ⚠️  NOT THE PRODUCTION DEPLOY. Production runs on an Ubuntu VPS behind Apache
+#     (reverse-proxy to Node on 127.0.0.1:4000) managed by pm2, with the SPA
+#     served from frontend/dist. Secrets live in sanmati/.env (NOT a Render
+#     dashboard), CORS_ORIGIN must be the real origin (never "*"), and workers
+#     run inside the API process (WORKERS_INLINE=true). For the real deploy see
+#     deploy/ (apache-sanmati.conf, fix-sanmati-proxy.sh, README.md) and
+#     ecosystem.config.cjs. Keep this file only if you also deploy to Render.
+#
 # Render Blueprint — one Web Service that builds the frontend and runs the
 # backend, which serves the built SPA from the SAME origin (one URL, no CORS).
 # Docs: https://render.com/docs/blueprint-spec

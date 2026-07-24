@@ -102,48 +102,6 @@ const CATEGORY_TO_TYPE = {
   finished_good: 'finished',
 };
 
-/* ═══ DEBUG ═══
- * Returns raw inventory state + user context if logged in. PUBLIC endpoint —
- * no authentication required. Call GET /api/v1/inventory/debug directly in
- * browser to diagnose why items aren't showing.
- */
-export const debugInventory = asyncHandler(async (req, res) => {
-  const [totalCount, activeCount, explicitlyInactiveCount, sample, plants] = await Promise.all([
-    InventoryItem.countDocuments({}),
-    InventoryItem.countDocuments({ active: true }),
-    InventoryItem.countDocuments({ active: false }),
-    InventoryItem.find({}).sort({ createdAt: -1 }).limit(20).lean(),
-    mongoose.model('Plant').find({}).limit(5).lean(),
-  ]);
-  res.json(ok({
-    db: {
-      totalItems: totalCount,
-      activeTrue: activeCount,
-      activeFalse: explicitlyInactiveCount,
-      activeUndefined: totalCount - activeCount - explicitlyInactiveCount,
-    },
-    currentUser: req.user ? {
-      id: req.user.id,
-      email: req.user.email,
-      plantId: req.user.plantId,
-      hasWildcard: req.user.permissions?.includes('*:*'),
-      permCount: req.user.permissions?.length,
-    } : null,
-    plants: plants.map((p) => ({ id: String(p._id), name: p.name, code: p.code })),
-    sample: sample.map((i) => ({
-      _id: String(i._id),
-      sku: i.sku,
-      name: i.name,
-      type: i.type,
-      category: i.category,
-      onHand: i.onHand,
-      active: i.active,
-      plantId: String(i.plantId || 'NONE'),
-      createdAt: i.createdAt,
-    })),
-  }));
-});
-
 const upsertSchema = z.object({
   sku: z.string().toUpperCase(),
   name: z.string().min(1),

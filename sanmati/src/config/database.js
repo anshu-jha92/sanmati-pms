@@ -10,13 +10,28 @@ export async function connectDatabase() {
   mongoose.connection.on('disconnected', () => logger.warn('MongoDB disconnected'));
   mongoose.connection.on('error', (err) => logger.error({ err: err.message }, 'MongoDB error'));
 
-  try {
-    await mongoose.connect(env.MONGODB_URI, {
-      maxPoolSize: env.MONGODB_POOL_SIZE,
-      serverSelectionTimeoutMS: 10_000,
-      socketTimeoutMS: 45_000,
-    });
-  } catch (err) {
+  // Retry the INITIAL connect with backoff so a slow-starting DB on a fresh
+  // deploy / VPS reboot self-heals instead of crash-looping under pm2.
+  // (mongoose auto-reconnects on its own for drops AFTER a successful connect.)
+  const MAX_ATTEMPTS = 8;
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await mongoose.connect(env.MONGODB_URI, {
+        maxPoolSize: env.MONGODB_POOL_SIZE,
+        serverSelectionTimeoutMS: 10_000,
+        socketTimeoutMS: 45_000,
+      });
+      break;
+    } catch (err) {
+      if (attempt < MAX_ATTEMPTS) {
+        const delay = Math.min(attempt * 2000, 30_000);
+        logger.warn(
+          { attempt, maxAttempts: MAX_ATTEMPTS, retryInMs: delay, err: err.message },
+          'MongoDB connect failed — retrying'
+        );
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
     const redacted = env.MONGODB_URI.replace(/\/\/([^:]+):[^@]+@/, '//$1:***@');
     // eslint-disable-next-line no-console
     console.error('\n❌ MongoDB connection failed.');
@@ -46,7 +61,8 @@ export async function connectDatabase() {
           '   → In Atlas, also check the IP allow-list for this machine.\n'
       );
     }
-    process.exit(1);
+      process.exit(1);
+    }
   }
 
   return mongoose.connection;

@@ -8,6 +8,7 @@ import {
 import clsx from 'clsx';
 import { inventoryApi, materialIssueApi, adminApi, materialRequestApi } from '../api/endpoints.js';
 import { authStore } from '../context/authStore.js';
+import { BASE_URL } from '../api/client.js';
 import { ItemTrackingModal } from '../components/inventory/ItemTrackingModal.jsx';
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -27,8 +28,6 @@ const CATEGORIES = {
   finished: { label: 'Finished Good' },
 };
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
-
 export function RawMaterialsPage({ category = 'raw' }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -42,7 +41,6 @@ export function RawMaterialsPage({ category = 'raw' }) {
   const [showRequests, setShowRequests] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [trackingSku, setTrackingSku] = useState(null);
-  const [debugInfo, setDebugInfo] = useState(null);
   const qc = useQueryClient();
 
   async function refresh() {
@@ -65,15 +63,6 @@ export function RawMaterialsPage({ category = 'raw' }) {
       let json = null;
       try { json = text ? JSON.parse(text) : null; } catch { /* not JSON */ }
 
-      setDebugInfo({
-        url: url.toString(),
-        status: res.status,
-        ok: res.ok,
-        hasToken: !!token,
-        rawText: text.substring(0, 1000),
-        json,
-      });
-
       if (!res.ok) {
         setErr(json?.error?.message || `HTTP ${res.status}: ${res.statusText}`);
         setItems([]);
@@ -95,7 +84,6 @@ export function RawMaterialsPage({ category = 'raw' }) {
     } catch (e) {
       setErr(e.message || 'Network error');
       setItems([]);
-      setDebugInfo({ error: e.message });
     } finally {
       setLoading(false);
     }
@@ -153,13 +141,6 @@ export function RawMaterialsPage({ category = 'raw' }) {
           <RefreshCw className={`h-4 w-4 ${sync.isPending ? 'animate-spin' : ''}`} />
           {sync.isPending ? 'Syncing…' : 'Sync from ERP'}
         </button>
-        <button
-          className="btn-secondary text-[11px]"
-          onClick={() => console.log('Debug info:', debugInfo)}
-          title="Click to print debug info in browser console (F12)"
-        >
-          🔍 Debug
-        </button>
         {stats.lowStock > 0 && !isFG && (
           <button
             onClick={() => setFilters({ ...filters, lowStockOnly: !filters.lowStockOnly })}
@@ -205,12 +186,6 @@ export function RawMaterialsPage({ category = 'raw' }) {
       {err && (
         <div className="rounded-lg bg-state-down/5 border border-state-down/30 p-3 text-[12px] text-state-down">
           <strong>Couldn't load:</strong> {err}
-          <details className="mt-2 text-[10.5px] text-ink-600">
-            <summary className="cursor-pointer">Technical details</summary>
-            <pre className="mt-1 bg-white p-2 rounded border border-ink-200 overflow-auto max-h-40">
-              {JSON.stringify(debugInfo, null, 2)}
-            </pre>
-          </details>
         </div>
       )}
 

@@ -7,6 +7,7 @@ import { disconnectRedis, ensureRedisAvailable } from './config/redis.js';
 import { socketService } from './services/socket.service.js';
 import { closeQueues } from './services/queue.service.js';
 import { createSuperAdminIfNeeded } from './services/adminBootstrap.service.js';
+import { startWorkers, stopWorkers } from './workers/index.js';
 
 async function main() {
   // Fail fast with ONE clear message if Redis is not reachable.
@@ -32,6 +33,15 @@ async function main() {
   const httpServer = http.createServer(app);
   socketService.init(httpServer);
 
+  // Run background workers in-process by default (single-service deploy). This
+  // is what actually consumes the telemetry/oee/erp-sync queues AND lets their
+  // Socket.IO emits reach dashboards. Set WORKERS_INLINE=false only if you run a
+  // dedicated `npm run worker` process instead.
+  let workers = [];
+  if (env.WORKERS_INLINE !== 'false') {
+    workers = startWorkers();
+  }
+
   // Handle listen errors cleanly. Without this, a busy port surfaces as an
   // unhandled 'error' event -> uncaughtException -> a FATAL stack-trace storm.
   // The most common case in dev is another API instance already on this port.
@@ -54,11 +64,22 @@ async function main() {
 
   shutdownOn(['SIGINT', 'SIGTERM'], async () => {
     logger.info('Shutting down API...');
-    httpServer.close();
+    // Bound the shutdown so a hung connection can't block exit forever.
+    const watchdog = setTimeout(() => {
+      logger.error('Shutdown watchdog fired — forcing exit');
+      process.exit(1);
+    }, 10_000);
+    watchdog.unref();
+
+    // Stop accepting new connections and wait for in-flight requests to finish
+    // BEFORE tearing down the DB/Redis they depend on.
+    await new Promise((resolve) => httpServer.close(resolve));
+    await stopWorkers(workers);
     await socketService.close();
     await closeQueues();
     await disconnectDatabase();
     await disconnectRedis();
+    clearTimeout(watchdog);
     logger.info('Shutdown complete');
     process.exit(0);
   });

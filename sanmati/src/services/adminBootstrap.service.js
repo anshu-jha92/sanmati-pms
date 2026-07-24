@@ -7,7 +7,13 @@ import { MODULES, ACTIONS } from '../models/Permission.js';
 
 export async function createSuperAdminIfNeeded() {
   try {
-    // Require explicit admin credentials in backend .env to proceed
+    // Bootstrap must be explicitly opted into AND given credentials. Without the
+    // flag, a stray ADMIN_EMAIL/ADMIN_PASSWORD in .env must NOT silently create a
+    // full-permission super-admin on boot.
+    if (env.ADMIN_CREATE_ON_BOOT !== 'true') {
+      logger.debug('Admin bootstrap skipped: ADMIN_CREATE_ON_BOOT is not "true"');
+      return null;
+    }
     if (!env.ADMIN_EMAIL || !env.ADMIN_PASSWORD) {
       logger.debug('Admin bootstrap skipped: ADMIN_EMAIL or ADMIN_PASSWORD not set in environment');
       return null;

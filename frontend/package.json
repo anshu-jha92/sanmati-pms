@@ -3,6 +3,15 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=18.18.0"
+  },
+  "browserslist": [
+    "chrome >= 90",
+    "firefox >= 90",
+    "edge >= 90",
+    "safari >= 15"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "vite build",

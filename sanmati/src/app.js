@@ -6,7 +6,9 @@ import helmet from 'helmet';
 import cors from 'cors';
 import compression from 'compression';
 import pinoHttp from 'pino-http';
+import mongoose from 'mongoose';
 import { env } from './config/env.js';
+import { cacheClient } from './config/redis.js';
 
 // Resolve the frontend build (frontend/dist) relative to this file (sanmati/src/app.js).
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -26,7 +28,12 @@ export function buildApp() {
   app.use(
     pinoHttp({
       logger,
-      autoLogging: { ignore: (req) => req.url === '/health' },
+      // Skip liveness/readiness pings and the high-frequency IoT ingest paths —
+      // logging every telemetry packet floods logs and slows the hot path.
+      autoLogging: {
+        ignore: (req) =>
+          req.url === '/health' || req.url === '/ready' || req.url.startsWith('/iot'),
+      },
       customLogLevel: (_req, res, err) => {
         if (err || res.statusCode >= 500) return 'error';
         if (res.statusCode >= 400) return 'warn';
@@ -38,14 +45,29 @@ export function buildApp() {
   app.use(helmet({ contentSecurityPolicy: false }));
   app.use(
     cors({
-      origin: env.CORS_ORIGIN == '*' ? true : env.CORS_ORIGIN.split(',').map((s) => s.trim()),
+      origin: env.CORS_ORIGIN === '*' ? true : env.CORS_ORIGIN.split(',').map((s) => s.trim()),
       credentials: true,
       maxAge: 600,
     })
   );
   app.use(compression());
 
+  // Liveness: is the process up? (cheap, no dependencies)
   app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
+
+  // Readiness: can we actually serve traffic? Verifies Mongo + Redis so a load
+  // balancer / Apache health probe stops routing to a broken instance.
+  app.get('/ready', async (_req, res) => {
+    const mongoOk = mongoose.connection.readyState === 1;
+    let redisOk = false;
+    try {
+      redisOk = (await cacheClient.ping()) === 'PONG';
+    } catch {
+      redisOk = false;
+    }
+    const ok = mongoOk && redisOk;
+    res.status(ok ? 200 : 503).json({ ok, mongo: mongoOk, redis: redisOk, ts: Date.now() });
+  });
 
   // IoT routes — have their own JSON parser with larger limit (see routes/iot.js)
   app.use('/iot/v1', buildIotRouter());

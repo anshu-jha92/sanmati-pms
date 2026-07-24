@@ -4,6 +4,9 @@
   "description": "Production Automation / MES backend — MERN + IoT",
   "type": "module",
   "main": "src/server.js",
+  "engines": {
+    "node": ">=18.18.0"
+  },
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",

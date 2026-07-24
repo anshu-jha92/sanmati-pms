@@ -56,8 +56,13 @@ const schema = z.object({
   IOT_RATE_LIMIT_RPS: z.coerce.number().default(100),
   IOT_MAX_PAYLOAD_BYTES: z.coerce.number().default(262144),
 
-  // External system integration API (for pushing sales/purchase orders from ERP)
-  INTEGRATION_API_KEY: z.string().optional(),
+  // External system integration API (for pushing sales/purchase orders from ERP).
+  // When set it is the sole credential on those endpoints, so require real entropy.
+  INTEGRATION_API_KEY: z.string().min(16, 'INTEGRATION_API_KEY must be a long random value').optional(),
+
+  // Run background workers inside the API process (single-service deploy).
+  // Set to 'false' only if you run a dedicated `npm run worker` process.
+  WORKERS_INLINE: z.string().default('true'),
 
   WORKER_CONCURRENCY_TELEMETRY: z.coerce.number().default(8),
   WORKER_CONCURRENCY_OEE: z.coerce.number().default(2),
@@ -71,6 +76,16 @@ const schema = z.object({
   ADMIN_NAME: z.string().optional(),
   ADMIN_EMPLOYEE_CODE: z.string().optional(),
   ADMIN_PHONE: z.string().optional(),
+}).superRefine((val, ctx) => {
+  // In production, refuse a wildcard CORS origin. Combined with credentials:true
+  // it reflects any origin (CWE-942); require an explicit allow-list instead.
+  if (val.NODE_ENV === 'production' && val.CORS_ORIGIN.trim() === '*') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['CORS_ORIGIN'],
+      message: 'CORS_ORIGIN must be an explicit origin (e.g. https://your-domain) in production, not "*".',
+    });
+  }
 });
 
 const parsed = schema.safeParse(process.env);
@@ -82,7 +97,7 @@ if (!parsed.success) {
     console.error(`  ${key}:\n    ${errs.join('\n    ')}\n`);
   }
   // eslint-disable-next-line no-console
-  console.error('Tip: copy backend/.env.example to backend/.env and fill in valid values.\n');
+  console.error('Tip: copy sanmati/.env.example to sanmati/.env and fill in valid values.\n');
   process.exit(1);
 }
 
