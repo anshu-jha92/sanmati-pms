@@ -186,14 +186,18 @@ export function AppLayout() {
       >
         <div className="px-4 py-4 border-b border-ink-200 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div
-              className="h-9 w-9 rounded-[9px] grid place-items-center text-[17px] shrink-0"
-              style={{
-                background: 'linear-gradient(135deg, #1a6bff, #0050d9)',
-                boxShadow: '0 3px 10px rgba(26,107,255,0.32)',
-              }}
-            >
-              🏭
+            <div className="h-9 w-9 rounded-[9px] grid place-items-center shrink-0 bg-white ring-1 ring-ink-200 shadow-sm overflow-hidden">
+              <img
+                src="/sanmati-logo.png"
+                alt="Sanmati"
+                className="h-[30px] w-[30px] object-contain"
+                onError={(e) => {
+                  // Logo missing → fall back to the old factory tile so the
+                  // header never renders an empty box.
+                  e.currentTarget.parentElement.style.background = 'linear-gradient(135deg, #1a6bff, #0050d9)';
+                  e.currentTarget.parentElement.textContent = '🏭';
+                }}
+              />
             </div>
             <div>
               <div className="font-bold text-[14px] text-ink-900 leading-tight">Sanmati</div>
